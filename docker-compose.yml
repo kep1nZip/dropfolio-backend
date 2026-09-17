@@ -1,0 +1,44 @@
+version: "3.9"
+
+# Local dev stack for Dropfolio backend.
+# Azure SQL Edge = SQL Server-compatible engine (works on Apple Silicon too), close enough
+# to Azure SQL for local dev/test per SYSTEM_ARCHITECTURE.md. Production still targets Azure SQL.
+
+services:
+  mssql:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: dropfolio-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Dropfolio!DevOnly123"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - dropfolio_mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: dropfolio-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: dropfolio-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  dropfolio_mssql_data:

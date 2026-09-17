@@ -1,0 +1,174 @@
+spring:
+  application:
+    name: dropfolio
+
+  datasource:
+    url: ${DB_URL:jdbc:sqlserver://localhost:1433;databaseName=dropfolio;encrypt=true;trustServerCertificate=true}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+  mail:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+  # M8 — EmailWorker's own @Scheduled(fixedDelay=30000) tick must not queue behind
+  # PriceSyncJob's @Scheduled tick (or vice versa) on Spring's default single-thread scheduler
+  # pool, especially since a failing email send can block its thread for several real seconds
+  # (resilience4j backoff sleeps, §12). Bumped from the Spring Boot default of 1 to 2 threads —
+  # additive config, no new dependency, not a design change to either scheduled task itself.
+  # M8 Postman-testing gap fix: without this, Jackson silently truncates a JSON float sent for
+  # an integer-typed field (e.g. POST /alerts { "itemId": 1.5 }) into 1 instead of rejecting it
+  # — the request then succeeds against a DIFFERENT resource than the client apparently meant,
+  # with no error at all. Disabling this makes Jackson throw on deserialization instead, which
+  # GlobalExceptionHandler already maps to 422 (HttpMessageNotReadableException -> "Malformed
+  # request body") — no new exception handler needed.
+  jackson:
+    deserialization:
+      accept-float-as-int: false
+
+  task:
+    scheduling:
+      pool:
+        size: 2
+
+server:
+  port: ${SERVER_PORT:8080}
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-ttl-seconds: ${JWT_ACCESS_TTL:900}      # 15 minutes
+  refresh-token-ttl-seconds: ${JWT_REFRESH_TTL:2592000} # 30 days
+
+steam:
+  api-key: ${STEAM_API_KEY}
+  link-state-ttl-seconds: 300 # 5 minutes — resolved per TECHNICAL_SPEC.md §0/§18
+
+ratelimit:
+  window-seconds: ${RATELIMIT_WINDOW:60}
+  max-requests: ${RATELIMIT_MAX:60}
+  login:
+    window-seconds: ${RATELIMIT_LOGIN_WINDOW:900}   # 15 minutes — API_CONTRACT.md §0.13
+    max-requests: ${RATELIMIT_LOGIN_MAX:10}
+  register:
+    window-seconds: ${RATELIMIT_REGISTER_WINDOW:3600} # 60 minutes — API_CONTRACT.md §0.13
+    max-requests: ${RATELIMIT_REGISTER_MAX:5}
+  admin-sync:
+    # M7 — API_CONTRACT.md §11: 1 req / 60s / admin for POST /admin/sync-jobs/price-sync.
+    # Enforced in AdminSyncService, not a RateLimitFilter instance (see AdminSyncRateLimitProperties javadoc).
+    window-seconds: ${RATELIMIT_ADMIN_SYNC_WINDOW:60}
+    max-requests: ${RATELIMIT_ADMIN_SYNC_MAX:1}
+
+# M7 — Steam Community Market's public, unauthenticated priceoverview endpoint. Timeouts
+# locked at TECHNICAL_SPEC.md §7. Does NOT reuse `steam.api-key` (that key is for the
+# separate, out-of-scope Steam Login/inventory flow — M7 Implementation Authorization §20).
+pricing:
+  provider:
+    base-url: ${PRICE_PROVIDER_BASE_URL:https://steamcommunity.com}
+    app-id: ${PRICE_PROVIDER_APP_ID:730}
+    currency: ${PRICE_PROVIDER_CURRENCY:1}
+    connect-timeout-ms: ${PRICE_PROVIDER_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${PRICE_PROVIDER_READ_TIMEOUT_MS:5000}
+
+# M7 — PriceSyncJob scheduling + the distributed lock it shares with the admin manual trigger.
+scheduler:
+  price-sync:
+    fixed-delay-ms: ${SCHEDULER_PRICE_SYNC_INTERVAL_MS:900000} # 15 minutes baseline
+  lock:
+    ttl-seconds: ${SCHEDULER_LOCK_TTL_SECONDS:600} # 10 minutes — CLAUDE_CONTEXT.md §8.1
+
+app:
+  cookie:
+    # Secure=true is mandatory in production (HTTPS). Local dev over plain http:// needs this
+    # false, otherwise browsers silently drop the Set-Cookie — operational toggle only, does
+    # NOT relax the contract (SYSTEM_ARCHITECTURE.md §3.3 still mandates httpOnly+Secure+SameSite=Strict in prod).
+    secure: ${COOKIE_SECURE:true}
+
+  # M10 — SYSTEM_ARCHITECTURE.md §10: exactly one real frontend origin, set per-environment via
+  # env var. Never a wildcard — see SecurityConfig.corsConfigurationSource() for why.
+  cors:
+    allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:3000}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      steamApiClient:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+      priceProvider:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+      emailSmtp:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 3
+      redisCache:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+  retry:
+    instances:
+      # M7 — PM Decision M7 §6 / TECHNICAL_SPEC.md §7: "3 attempts, 1s -> 2s -> 4s". Read as 3
+      # RETRIES after the initial call (4 total invocations) so all three literal backoff
+      # values are actually used by the exponential sequence (1s, 2s, 4s) — with max-attempts
+      # taken as "3 total calls" only 2 waits (1s, 2s) would ever occur and the locked "4s"
+      # value would be unreachable. Flagged as an interpretation note, not a silent guess —
+      # see PriceSyncService javadoc and PM Decision M7 §6 for the source text this resolves.
+      priceProvider:
+        max-attempts: 4
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+      # M8 Implementation Authorization §12: "1 initial attempt + 3 retries, backoff 1s/2s/4s"
+      # — same max-attempts=4 interpretation as priceProvider above, for the same reason (all
+      # three literal backoff values only become reachable that way). This is the INNER retry
+      # for a single EmailWorker send attempt — see EmailWorker javadoc for the separate OUTER
+      # retry ceiling tracked by email_jobs.attempt_count/max_attempts.
+      emailSmtp:
+        max-attempts: 4
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    com.dropfolio: INFO
