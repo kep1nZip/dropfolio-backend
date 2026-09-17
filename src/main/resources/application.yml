@@ -35,9 +35,9 @@ spring:
     properties:
       mail:
         smtp:
-          auth: true
+          auth: ${SMTP_AUTH:false}
           starttls:
-            enable: true
+            enable: ${SMTP_STARTTLS:false}
 
   # M8 — EmailWorker's own @Scheduled(fixedDelay=30000) tick must not queue behind
   # PriceSyncJob's @Scheduled tick (or vice versa) on Spring's default single-thread scheduler
@@ -168,6 +168,9 @@ management:
     web:
       exposure:
         include: health
+  endpoint:
+    health:
+      show-details: always
 
 logging:
   level:

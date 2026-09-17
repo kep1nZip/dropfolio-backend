@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Local dev stack for Dropfolio backend.
 # Azure SQL Edge = SQL Server-compatible engine (works on Apple Silicon too), close enough
 # to Azure SQL for local dev/test per SYSTEM_ARCHITECTURE.md. Production still targets Azure SQL.
@@ -39,6 +37,18 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+
+  backend:
+    image: dropfolio-backend
+    container_name: dropfolio-backend
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mssql
+      - redis
+      - mailpit
 
 volumes:
   dropfolio_mssql_data:
