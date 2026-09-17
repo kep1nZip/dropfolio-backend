@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
   pull_request:
     branches:
       - main
@@ -32,3 +33,6 @@ jobs:
 
       - name: Run Tests
         run: mvn -B test
+
+      - name: Build Docker Image
+        run: docker build -t dropfolio-backend .
