@@ -113,6 +113,8 @@ public class SecurityConfig {
                                 .requestMatchers(HttpMethod.PATCH, "/api/v1/items/*").hasRole("ADMIN")
                                 // Domain: Prices — API_CONTRACT.md §8. GET /prices/{itemId} is PUBLIC (PM Decision).
                                 .requestMatchers(HttpMethod.GET, "/api/v1/prices/*").permitAll()
+                                // Price history is the same global market data — public, single-segment id only.
+                                .requestMatchers(HttpMethod.GET, "/api/v1/prices/*/history").permitAll()
                                 // Domain: Admin sync-jobs (M7) — API_CONTRACT.md §11. EXACTLY these 3 endpoints
                                 // (M7 Implementation Authorization §4); no other /admin/** matcher is added here.
                                 .requestMatchers(HttpMethod.POST, "/api/v1/admin/sync-jobs/price-sync").hasRole("ADMIN")

@@ -3,6 +3,8 @@ package com.dropfolio.pricing.repository;
 import com.dropfolio.pricing.entity.ItemPrice;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface ItemPriceRepository extends JpaRepository<ItemPrice, Long> {
@@ -13,4 +15,14 @@ public interface ItemPriceRepository extends JpaRepository<ItemPrice, Long> {
      * {@code IX_item_prices_item_fetched (item_id, fetched_at DESC)} — ERD.md §2.6.
      */
     Optional<ItemPrice> findTopByItemIdOrderByFetchedAtDesc(Long itemId);
+
+    /**
+     * Price history for a bounded range — only snapshots with {@code price_available = true},
+     * oldest first. Served by {@code IX_item_prices_item_fetched (item_id, fetched_at DESC)}.
+     */
+    List<ItemPrice> findByItemIdAndPriceAvailableTrueAndFetchedAtGreaterThanEqualOrderByFetchedAtAsc(
+            Long itemId, Instant from);
+
+    /** Price history for {@code range=all} (no lower bound); same filtering and ordering. */
+    List<ItemPrice> findByItemIdAndPriceAvailableTrueOrderByFetchedAtAsc(Long itemId);
 }
